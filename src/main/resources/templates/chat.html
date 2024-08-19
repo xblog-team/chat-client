@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chat Application</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.2/sockjs.min.js"></script>
+    <style>
+        #chat {
+            border: 1px solid #ccc;
+            width: 300px;
+            height: 300px;
+            overflow-y: scroll;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .whisper-text {
+            color: blue;
+        }
+    </style>
+</head>
+<body>
+<h1>Chat Room</h1>
+<div id="chat"></div> <!-- Chat messages will be appended here -->
+<input type="text" id="messageInput" placeholder="Type your message here"/>
+<button onclick="sendMessage()">Send</button>
+
+<script>
+    var socket = new SockJS('http://localhost:8888/chat');  // WebSocket 연결 설정
+    var stompClient = Stomp.over(socket);
+    var roomId = null;
+
+    // STOMP 클라이언트 연결
+    stompClient.connect({}, function (frame) {
+        console.log('Connected: ' + frame);
+
+        // 페이지 로딩 시 방 번호 응답을 먼저 구독
+        subscribeFindRoomResponse();
+    });
+
+    // 방 번호 응답을 구독하는 함수
+    function subscribeFindRoomResponse() {
+        // 유저 개인 큐에 구독하여 방 번호 응답을 대기
+        stompClient.subscribe('/user/queue/findRoom', function (response) {
+            roomId = response.body;  // 응답에서 roomId 받기
+            console.log('Received roomId: ' + roomId);
+
+            // roomId를 받은 후 해당 채팅방에 입장
+            enterRoom(roomId);
+        });
+
+        // 방 번호 요청을 이제 보냄
+        findRoom();
+    }
+
+    // 방 번호를 요청하는 함수
+    function findRoom() {
+        console.log('Finding room...');
+        // 빈 메시지를 보내어 방 번호 요청
+        stompClient.send('/app/chat/findRoom', {}, '');
+    }
+
+    // 채팅방에 입장하는 함수
+    function enterRoom(roomId) {
+        console.log('Entering room: ' + roomId);
+
+        // 채팅방을 구독하여 메시지를 받을 준비
+        stompClient.subscribe('/topic/' + roomId, function (message) {
+            var chatArea = document.getElementById('chat');
+            console.log(message.body);
+            chatArea.innerHTML += '<p>' + message.body + '</p>';  // 메시지를 채팅 창에 추가
+            chatArea.scrollTop = chatArea.scrollHeight;  // 스크롤을 가장 아래로 이동
+        });
+
+        // 귓속말 컨트롤러 구독
+        stompClient.subscribe('/user/queue/whisper', function (message) {
+            var chatArea = document.getElementById('chat');
+            console.log(message.body);
+            chatArea.innerHTML += '<p class="whisper-text">' + message.body + '</p>';  // 메시지를 채팅 창에 추가
+            chatArea.scrollTop = chatArea.scrollHeight;  // 스크롤을 가장 아래로 이동
+        });
+
+        // 방에 입장했다는 메시지를 서버에 전송
+        stompClient.send('/app/chat/enter/' + roomId, {}, JSON.stringify({'content': 'Hello, I entered room ' + roomId + '!'}));
+    }
+
+    // 메시지를 전송하는 함수
+    function sendMessage() {
+        var message = document.getElementById('messageInput').value;
+        if (message.startsWith("/w")) {
+            var whisperCommand = message.split(" ");
+            var receiver = whisperCommand[1];
+            var content = whisperCommand.slice(2).join(" ");
+
+            if (receiver && content) {
+                var whisperMessage = {
+                    receiver: receiver,
+                    content: content
+                };
+
+                stompClient.send('/app/chat/whisper', {}, JSON.stringify(whisperMessage));
+                document.getElementById('messageInput').value = '';
+                console.log(receiver + ":" + content);
+            } else {
+                console.log("invalid whisper command");
+            }
+        }
+
+        else if (roomId) {
+            // 해당 채팅방으로 메시지를 전송
+            stompClient.send('/app/chat/' + roomId, {}, message);
+            document.getElementById('messageInput').value = '';  // 메시지 전송 후 입력창 비우기
+        } else {
+            console.log('Room ID is not set yet.');
+        }
+    }
+</script>
+</body>
+</html>
