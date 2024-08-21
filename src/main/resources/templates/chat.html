@@ -13,6 +13,7 @@
             padding: 10px;
             margin-bottom: 10px;
         }
+
         .whisper-text {
             color: blue;
         }
@@ -67,7 +68,21 @@
         stompClient.subscribe('/topic/' + roomId, function (message) {
             var chatArea = document.getElementById('chat');
             console.log(message.body);
-            chatArea.innerHTML += '<p>' + message.body + '</p>';  // 메시지를 채팅 창에 추가
+            var data = JSON.parse(message.body);
+            var sender = data.sender;
+            var content = data.content;
+
+            var messageElement = document.createElement('p');
+            messageElement.innerHTML = '<strong>' + sender + '</strong> ' + content;
+
+            messageElement.addEventListener('click', function () {
+                var messageInput = document.getElementById('messageInput');
+                messageInput.value = '/w ' + sender + ' ';
+                messageInput.focus();
+            });
+
+            // chatArea.innerHTML += '<p>' + message.body + '</p>';  // 메시지를 채팅 창에 추가
+            chatArea.appendChild(messageElement);
             chatArea.scrollTop = chatArea.scrollHeight;  // 스크롤을 가장 아래로 이동
         });
 
@@ -75,7 +90,22 @@
         stompClient.subscribe('/user/queue/whisper', function (message) {
             var chatArea = document.getElementById('chat');
             console.log(message.body);
-            chatArea.innerHTML += '<p class="whisper-text">' + message.body + '</p>';  // 메시지를 채팅 창에 추가
+            var data = JSON.parse(message.body);
+            var sender = data.sender;
+            var content = data.content;
+
+            var messageElement = document.createElement('p');
+            messageElement.className = 'whisper-text';
+            messageElement.innerHTML = '<strong>' + sender + '</strong> ' + content;
+
+            messageElement.addEventListener('click', function () {
+                var messageInput = document.getElementById('messageInput');
+                messageInput.value = '/w ' + sender + ' ';
+                messageInput.focus();
+            });
+
+            // chatArea.innerHTML += '<p class="whisper-text">' + message.body + '</p>';  // 메시지를 채팅 창에 추가
+            chatArea.appendChild(messageElement);
             chatArea.scrollTop = chatArea.scrollHeight;  // 스크롤을 가장 아래로 이동
         });
 
@@ -103,9 +133,7 @@
             } else {
                 console.log("invalid whisper command");
             }
-        }
-
-        else if (roomId) {
+        } else if (roomId) {
             // 해당 채팅방으로 메시지를 전송
             stompClient.send('/app/chat/' + roomId, {}, message);
             document.getElementById('messageInput').value = '';  // 메시지 전송 후 입력창 비우기
@@ -113,6 +141,7 @@
             console.log('Room ID is not set yet.');
         }
     }
+
 </script>
 </body>
 </html>
