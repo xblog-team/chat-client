@@ -21,7 +21,13 @@
 </head>
 <body>
 <h1>Chat Room</h1>
-<div id="chat"></div> <!-- Chat messages will be appended here -->
+<div style="display: flex;">
+    <div id="chat" style="flex: 2;"></div> <!-- Chat messages will be appended here -->
+    <div id="memberList" style="flex: 1; border: 1px solid #ccc; height: 300px; padding: 10px; overflow-y: scroll;">
+        <h2>Members</h2>
+        <ul id="members"></ul>
+    </div>
+</div>
 <input type="text" id="messageInput" placeholder="Type your message here"/>
 <button onclick="sendMessage()">Send</button>
 
@@ -64,6 +70,12 @@
     function enterRoom(roomId) {
         console.log('Entering room: ' + roomId);
 
+        // 사용자 목록 구독
+        stompClient.subscribe('/topic/' + roomId + '/members', function (message) {
+            var members = JSON.parse(message.body);
+            updateMemberList(members);
+        });
+
         // 채팅방을 구독하여 메시지를 받을 준비
         stompClient.subscribe('/topic/' + roomId, function (message) {
             var chatArea = document.getElementById('chat');
@@ -81,7 +93,6 @@
                 messageInput.focus();
             });
 
-            // chatArea.innerHTML += '<p>' + message.body + '</p>';  // 메시지를 채팅 창에 추가
             chatArea.appendChild(messageElement);
             chatArea.scrollTop = chatArea.scrollHeight;  // 스크롤을 가장 아래로 이동
         });
@@ -104,13 +115,32 @@
                 messageInput.focus();
             });
 
-            // chatArea.innerHTML += '<p class="whisper-text">' + message.body + '</p>';  // 메시지를 채팅 창에 추가
             chatArea.appendChild(messageElement);
             chatArea.scrollTop = chatArea.scrollHeight;  // 스크롤을 가장 아래로 이동
         });
 
         // 방에 입장했다는 메시지를 서버에 전송
         stompClient.send('/app/chat/enter/' + roomId, {}, JSON.stringify({'content': 'Hello, I entered room ' + roomId + '!'}));
+    }
+
+    // 사용자 목록 업데이트 함수
+    function updateMemberList(members) {
+        var membersList = document.getElementById('members');
+        membersList.innerHTML = '';  // 기존 목록 초기화
+
+        members.forEach(function(member) {
+            var memberElement = document.createElement('li');
+            memberElement.textContent = member;
+
+            // 클릭 이벤트 리스너 추가
+            memberElement.addEventListener('click', function () {
+                var messageInput = document.getElementById('messageInput');
+                messageInput.value = '/w ' + member + ' ';
+                messageInput.focus();
+            });
+
+            membersList.appendChild(memberElement);
+        });
     }
 
     // 메시지를 전송하는 함수
