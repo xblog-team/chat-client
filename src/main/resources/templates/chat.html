@@ -22,7 +22,7 @@
 <body>
 <h1>Chat Room</h1>
 <div style="display: flex;">
-    <div id="chat" style="flex: 2;"></div> <!-- Chat messages will be appended here -->
+    <div id="chat" style="flex: 2;"></div>
     <div id="memberList" style="flex: 1; border: 1px solid #ccc; height: 300px; padding: 10px; overflow-y: scroll;">
         <h2>Members</h2>
         <ul id="members"></ul>
@@ -32,146 +32,124 @@
 <button onclick="sendMessage()">Send</button>
 
 <script>
-    var socket = new SockJS('http://localhost:8888/chat');  // WebSocket 연결 설정
-    var stompClient = Stomp.over(socket);
-    var roomId = null;
+    const socket = new SockJS('http://localhost:8888/chat');
+    const stompClient = Stomp.over(socket);
+    let roomId = null;
 
-    // STOMP 클라이언트 연결
-    stompClient.connect({}, function (frame) {
-        console.log('Connected: ' + frame);
-
-        // 페이지 로딩 시 방 번호 응답을 먼저 구독
-        subscribeFindRoomResponse();
+    document.addEventListener('DOMContentLoaded', () => {
+        stompClient.connect({}, onConnected);
     });
 
-    // 방 번호 응답을 구독하는 함수
-    function subscribeFindRoomResponse() {
-        // 유저 개인 큐에 구독하여 방 번호 응답을 대기
-        stompClient.subscribe('/user/queue/findRoom', function (response) {
-            roomId = response.body;  // 응답에서 roomId 받기
-            console.log('Received roomId: ' + roomId);
-
-            // roomId를 받은 후 해당 채팅방에 입장
-            enterRoom(roomId);
-        });
-
-        // 방 번호 요청을 이제 보냄
+    function onConnected(frame) {
+        console.log('Connected: ' + frame);
+        subscribeToPrivateQueue();
         findRoom();
     }
 
-    // 방 번호를 요청하는 함수
+    function subscribeToPrivateQueue() {
+        stompClient.subscribe('/user/queue/findRoom', onRoomIdReceived);
+        stompClient.subscribe('/user/queue/whisper', onWhisperReceived);
+    }
+
+    function onRoomIdReceived(response) {
+        roomId = response.body;
+        console.log('Received roomId: ' + roomId);
+        enterRoom(roomId);
+    }
+
     function findRoom() {
         console.log('Finding room...');
-        // 빈 메시지를 보내어 방 번호 요청
-        stompClient.send('/app/chat/findRoom', {}, '');
+        stompClient.send('/app/chat/findRoom', {});
     }
 
-    // 채팅방에 입장하는 함수
     function enterRoom(roomId) {
         console.log('Entering room: ' + roomId);
+        stompClient.subscribe(`/topic/${roomId}/members`, onMembersUpdate);
+        stompClient.subscribe(`/topic/${roomId}`, onMessageReceived);
 
-        // 사용자 목록 구독
-        stompClient.subscribe('/topic/' + roomId + '/members', function (message) {
-            var members = JSON.parse(message.body);
-            updateMemberList(members);
-        });
-
-        // 채팅방을 구독하여 메시지를 받을 준비
-        stompClient.subscribe('/topic/' + roomId, function (message) {
-            var chatArea = document.getElementById('chat');
-            console.log(message.body);
-            var data = JSON.parse(message.body);
-            var sender = data.sender;
-            var content = data.content;
-
-            var messageElement = document.createElement('p');
-            messageElement.innerHTML = '<strong>' + sender + '</strong> ' + content;
-
-            messageElement.addEventListener('click', function () {
-                var messageInput = document.getElementById('messageInput');
-                messageInput.value = '/w ' + sender + ' ';
-                messageInput.focus();
-            });
-
-            chatArea.appendChild(messageElement);
-            chatArea.scrollTop = chatArea.scrollHeight;  // 스크롤을 가장 아래로 이동
-        });
-
-        // 귓속말 컨트롤러 구독
-        stompClient.subscribe('/user/queue/whisper', function (message) {
-            var chatArea = document.getElementById('chat');
-            console.log(message.body);
-            var data = JSON.parse(message.body);
-            var sender = data.sender;
-            var content = data.content;
-
-            var messageElement = document.createElement('p');
-            messageElement.className = 'whisper-text';
-            messageElement.innerHTML = '<strong>' + sender + '</strong> ' + content;
-
-            messageElement.addEventListener('click', function () {
-                var messageInput = document.getElementById('messageInput');
-                messageInput.value = '/w ' + sender + ' ';
-                messageInput.focus();
-            });
-
-            chatArea.appendChild(messageElement);
-            chatArea.scrollTop = chatArea.scrollHeight;  // 스크롤을 가장 아래로 이동
-        });
-
-        // 방에 입장했다는 메시지를 서버에 전송
-        stompClient.send('/app/chat/enter/' + roomId, {}, JSON.stringify({'content': 'Hello, I entered room ' + roomId + '!'}));
+        stompClient.send(`/app/chat/enter/${roomId}`, {}, JSON.stringify({ content: `Hello, I entered room ${roomId}!` }));
     }
 
-    // 사용자 목록 업데이트 함수
+    function onMembersUpdate(message) {
+        const members = JSON.parse(message.body);
+        updateMemberList(members);
+    }
+
+    function onMessageReceived(message) {
+        const data = JSON.parse(message.body);
+        appendMessage(data.sender, data.content);
+    }
+
+    function onWhisperReceived(message) {
+        const data = JSON.parse(message.body);
+        appendMessage(data.sender, data.content, true);
+    }
+
+    function appendMessage(sender, content, isWhisper = false) {
+        const chatArea = document.getElementById('chat');
+        const messageElement = document.createElement('p');
+
+        if (isWhisper) {
+            messageElement.className = 'whisper-text';
+        }
+
+        messageElement.innerHTML = `<strong>${sender}</strong> ${content}`;
+        messageElement.addEventListener('click', () => {
+            populateWhisperCommand(sender);
+        });
+
+        chatArea.appendChild(messageElement);
+        chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    function populateWhisperCommand(sender) {
+        const messageInput = document.getElementById('messageInput');
+        messageInput.value = `/w ${sender} `;
+        messageInput.focus();
+    }
+
     function updateMemberList(members) {
-        var membersList = document.getElementById('members');
-        membersList.innerHTML = '';  // 기존 목록 초기화
+        const membersList = document.getElementById('members');
+        membersList.innerHTML = '';
 
-        members.forEach(function(member) {
-            var memberElement = document.createElement('li');
+        members.forEach(member => {
+            const memberElement = document.createElement('li');
             memberElement.textContent = member;
-
-            // 클릭 이벤트 리스너 추가
-            memberElement.addEventListener('click', function () {
-                var messageInput = document.getElementById('messageInput');
-                messageInput.value = '/w ' + member + ' ';
-                messageInput.focus();
+            memberElement.addEventListener('click', () => {
+                populateWhisperCommand(member);
             });
-
             membersList.appendChild(memberElement);
         });
     }
 
-    // 메시지를 전송하는 함수
     function sendMessage() {
-        var message = document.getElementById('messageInput').value;
+        const message = document.getElementById('messageInput').value;
         if (message.startsWith("/w")) {
-            var whisperCommand = message.split(" ");
-            var receiver = whisperCommand[1];
-            var content = whisperCommand.slice(2).join(" ");
-
-            if (receiver && content) {
-                var whisperMessage = {
-                    receiver: receiver,
-                    content: content
-                };
-
-                stompClient.send('/app/chat/whisper', {}, JSON.stringify(whisperMessage));
-                document.getElementById('messageInput').value = '';
-                console.log(receiver + ":" + content);
-            } else {
-                console.log("invalid whisper command");
-            }
+            sendWhisperMessage(message);
         } else if (roomId) {
-            // 해당 채팅방으로 메시지를 전송
-            stompClient.send('/app/chat/' + roomId, {}, message);
-            document.getElementById('messageInput').value = '';  // 메시지 전송 후 입력창 비우기
+            sendChatMessage(message);
         } else {
             console.log('Room ID is not set yet.');
         }
     }
 
+    function sendWhisperMessage(message) {
+        const [_, receiver, ...contentParts] = message.split(" ");
+        const content = contentParts.join(" ");
+
+        if (receiver && content) {
+            stompClient.send('/app/chat/whisper', {}, JSON.stringify({ receiver, content }));
+            document.getElementById('messageInput').value = '';
+            console.log(`Whisper to ${receiver}: ${content}`);
+        } else {
+            console.log("Invalid whisper command");
+        }
+    }
+
+    function sendChatMessage(message) {
+        stompClient.send(`/app/chat/${roomId}`, {}, message);
+        document.getElementById('messageInput').value = '';
+    }
 </script>
 </body>
 </html>
