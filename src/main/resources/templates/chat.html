@@ -8,14 +8,94 @@
         #chat {
             border: 1px solid #ccc;
             width: 300px;
-            height: 300px;
+            height: 600px;
             overflow-y: scroll;
             padding: 10px;
             margin-bottom: 10px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 메시지 컨테이너 */
+        .message-container {
+            display: flex;
+            flex-direction: row;
+            margin-bottom: 10px;
+        }
+
+        .sent {
+            justify-content: flex-end;
+        }
+
+        .notice {
+            justify-content: center;
+            flex-direction: column;
+            display: flex;
+            width: 100%;
+        }
+
+        .received {
+            justify-content: flex-start; /* 수신자는 왼쪽 정렬 */
+        }
+
+        .message {
+            max-width: 60%;
+            margin-bottom: 5px;
+            padding: 10px;
+            border-radius: 10px;
+            position: relative;
+            word-wrap: break-word;
+        }
+
+        .own-message {
+            background-color: #dcf8c6;
+            text-align: right;
+        }
+
+        .other-message {
+            background-color: #f1f0f0;
+            text-align: left;
         }
 
         .whisper-text {
             color: blue;
+            background-color: #f0f8ff;
+            align-self: flex-start;
+            text-align: left;
+        }
+
+        .notice-text {
+            color: green;
+            font-weight: bold;
+            text-align: center;
+            width: 100%;
+        }
+
+        .message-time {
+            font-size: 0.8em;
+            color: #999;
+            align-self: flex-end; /* 시간은 송신자는 오른쪽, 수신자는 왼쪽 */
+        }
+
+        #memberList {
+            flex: 1;
+            border: 1px solid #ccc;
+            height: 300px;
+            padding: 10px;
+            overflow-y: scroll;
+        }
+
+        #memberList h2 {
+            text-align: center;
+        }
+
+        #members li {
+            cursor: pointer;
+            padding: 5px;
+        }
+
+        #members li:hover {
+            background-color: #e0e0e0;
         }
     </style>
 </head>
@@ -23,18 +103,19 @@
 <h1>Chat Room</h1>
 <div style="display: flex;">
     <div id="chat" style="flex: 2;"></div>
-    <div id="memberList" style="flex: 1; border: 1px solid #ccc; height: 300px; padding: 10px; overflow-y: scroll;">
+    <div id="memberList" style="flex: 1;">
         <h2>Members</h2>
         <ul id="members"></ul>
     </div>
 </div>
-<input type="text" id="messageInput" placeholder="Type your message here"/>
+<input type="text" id="messageInput" placeholder="Type your message here" onkeypress="if(event.key === 'Enter') sendMessage()"/>
 <button onclick="sendMessage()">Send</button>
 
 <script>
     const socket = new SockJS('http://localhost:8888/chat');
     const stompClient = Stomp.over(socket);
     let roomId = null;
+    let nickname = null;
 
     document.addEventListener('DOMContentLoaded', () => {
         stompClient.connect({}, onConnected);
@@ -43,17 +124,25 @@
     function onConnected(frame) {
         console.log('Connected: ' + frame);
         subscribeToPrivateQueue();
+        subscribeToNoticeChannel(); // 공지사항 구독 추가
         findRoom();
     }
 
     function subscribeToPrivateQueue() {
         stompClient.subscribe('/user/queue/findRoom', onRoomIdReceived);
         stompClient.subscribe('/user/queue/whisper', onWhisperReceived);
+        stompClient.subscribe('/user/queue/errors', onErrorReceived); // 에러 메시지 구독
+    }
+
+    function subscribeToNoticeChannel() {
+        stompClient.subscribe('/topic/notice', onNoticeReceived); // 모든 사용자가 공지사항을 구독
     }
 
     function onRoomIdReceived(response) {
-        roomId = response.body;
-        console.log('Received roomId: ' + roomId);
+        const data = JSON.parse(response.body);
+        nickname = data.nickname;
+        roomId = data.roomId;
+        console.log('Received roomId: ' + roomId + ', nickname: ' + nickname);
         enterRoom(roomId);
     }
 
@@ -77,37 +166,114 @@
 
     function onMessageReceived(message) {
         const data = JSON.parse(message.body);
-        appendMessage(data.sender, data.content);
+        appendMessage(data.sender, data.content, data.time);
     }
 
     function onWhisperReceived(message) {
         const data = JSON.parse(message.body);
-        appendMessage(data.sender, data.content, true);
+        appendMessage(data.sender, data.content, data.time, true);
     }
 
-    function appendMessage(sender, content, isWhisper = false) {
-        const chatArea = document.getElementById('chat');
-        const messageElement = document.createElement('p');
+    function onNoticeReceived(message) {
+        const data = JSON.parse(message.body);
+        appendMessage(data.sender, data.content, data.time, false, true); // 공지사항 메시지 처리
+    }
 
+    function onErrorReceived(message) {
+        appendErrorMessage(message.body); // 에러 메시지 처리
+    }
+
+    /**
+     * 메시지를 채팅창에 추가하는 함수
+     * @param {string} sender - 메시지를 보낸 사람의 닉네임
+     * @param {string} content - 메시지 내용
+     * @param {string} time - 메시지 시간
+     * @param {boolean} isWhisper - 귓속말 여부
+     * @param {boolean} isNotice - 공지사항 여부
+     */
+    function appendMessage(sender, content, time, isWhisper = false, isNotice = false) {
+        const chatArea = document.getElementById('chat');
+
+        // 메시지를 담을 컨테이너 div
+        const messageContainer = document.createElement('div');
+        messageContainer.classList.add('message-container');
+
+        // 메시지 요소
+        const messageElement = document.createElement('p');
+        messageElement.classList.add('message');
+
+        // 시간 요소
+        const timeElement = document.createElement('span');
+        timeElement.classList.add('message-time');
+        timeElement.textContent = time;
+
+        // 메시지 유형에 따라 클래스 추가
         if (isWhisper) {
-            messageElement.className = 'whisper-text';
+            messageElement.classList.add('whisper-text');
+        } else if (isNotice) {
+            messageElement.classList.add('notice-text');
+            messageElement.classList.add('notice');
         }
 
-        messageElement.innerHTML = `<strong>${sender}</strong> ${content}`;
-        messageElement.addEventListener('click', () => {
-            populateWhisperCommand(sender);
-        });
+        if (!isNotice) {
+            if (sender === nickname) {
+                messageElement.classList.add('own-message');
+                messageContainer.classList.add('sent'); // 송신자용 클래스 추가
+            } else {
+                messageElement.classList.add('other-message');
+                messageContainer.classList.add('received'); // 수신자용 클래스 추가
+            }
+        }
 
-        chatArea.appendChild(messageElement);
+        // 공지사항인 경우 보낸 사람 이름을 숨길 수 있습니다.
+        if (isNotice) {
+            messageElement.textContent = content;
+        } else {
+            messageElement.innerHTML = `<strong>${sender}</strong>: ${content}`;
+        }
+
+        // 공지사항이 아닌 경우 클릭 이벤트 추가
+        if (!isNotice) {
+            messageElement.addEventListener('click', () => {
+                populateWhisperCommand(sender);
+            });
+        }
+
+        // 메시지와 시간을 messageContainer에 추가
+        messageContainer.appendChild(messageElement);
+        messageContainer.appendChild(timeElement);
+
+        chatArea.appendChild(messageContainer);
         chatArea.scrollTop = chatArea.scrollHeight;
     }
 
+    /**
+     * 에러 메시지를 채팅창에 추가하는 함수
+     * @param {string} errorContent - 에러 메시지 내용
+     */
+    function appendErrorMessage(errorContent) {
+        const chatArea = document.getElementById('chat');
+        const errorElement = document.createElement('p');
+        errorElement.classList.add('error-text');
+        errorElement.textContent = errorContent;
+        chatArea.appendChild(errorElement);
+        chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    /**
+     * 귓속말 명령어를 입력창에 채워 넣는 함수
+     * @param {string} sender - 귓속말을 보낼 대상의 닉네임
+     */
     function populateWhisperCommand(sender) {
         const messageInput = document.getElementById('messageInput');
         messageInput.value = `/w ${sender} `;
         messageInput.focus();
     }
 
+    /**
+     * 사용자 목록을 업데이트하는 함수
+     * @param {Array} members - 현재 방에 있는 사용자 목록
+     */
     function updateMemberList(members) {
         const membersList = document.getElementById('members');
         membersList.innerHTML = '';
@@ -122,10 +288,17 @@
         });
     }
 
+    /**
+     * 메시지를 전송하는 함수
+     */
     function sendMessage() {
-        const message = document.getElementById('messageInput').value;
+        const message = document.getElementById('messageInput').value.trim();
+        if (message === '') return;
+
         if (message.startsWith("/w")) {
             sendWhisperMessage(message);
+        } else if (message.startsWith("/n")) {
+            sendNoticeMessage(message.substring(3).trim()); // /n 이후의 메시지를 공지사항으로 전송
         } else if (roomId) {
             sendChatMessage(message);
         } else {
@@ -133,6 +306,10 @@
         }
     }
 
+    /**
+     * 귓속말 메시지를 전송하는 함수
+     * @param {string} message - 전체 메시지 (예: "/w user Hello")
+     */
     function sendWhisperMessage(message) {
         const [_, receiver, ...contentParts] = message.split(" ");
         const content = contentParts.join(" ");
@@ -146,8 +323,25 @@
         }
     }
 
+    /**
+     * 공지사항 메시지를 전송하는 함수
+     * @param {string} message - 공지사항 메시지 내용
+     */
+    function sendNoticeMessage(message) {
+        if (message.length === 0) {
+            console.log("Notice message cannot be empty");
+            return;
+        }
+        stompClient.send('/app/chat/notice', {}, message);
+        document.getElementById('messageInput').value = '';
+    }
+
+    /**
+     * 일반 채팅 메시지를 전송하는 함수
+     * @param {string} message - 채팅 메시지 내용
+     */
     function sendChatMessage(message) {
-        stompClient.send(`/app/chat/${roomId}`, {}, message);
+        stompClient.send(`/app/chat/${roomId}`, {}, message );
         document.getElementById('messageInput').value = '';
     }
 </script>
